@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Счастливчик</title>
+    <!-- Materialize CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
+    <style>
+        .page-container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #luckyName {
+            font-size: 2em;
+            margin: 1em 0;
+            min-height: 50px; /* чтобы зона не "прыгала" */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #chartContainer {
+            width: 100%;
+            height: 400px;
+            margin-top: 30px;
+        }
+        .btn {
+            margin-right: 10px;
+        }
+        .top-section {
+            padding: 20px;
+        }
+        .settings-link {
+            position: absolute;
+            right: 20px;
+            top: 20px;
+        }
+    </style>
+</head>
+<body>
+<nav>
+    <div class="nav-wrapper teal">
+        <a href="/" class="brand-logo center">Счастливчик</a>
+        <ul id="nav-mobile" class="right hide-on-med-and-down">
+            <li><a href="/settings">Настройки</a></li>
+        </ul>
+    </div>
+</nav>
+
+<div class="page-container">
+    <div class="card">
+        <div class="card-content top-section">
+            <div class="row">
+                <div class="col s12 center">
+                    <button id="pickLuckyBtn" class="btn waves-effect waves-light teal">Выбрать счастливчика</button>
+                    <button id="confirmBtn" class="btn green" style="display:none;">Подтвердить</button>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col s12 center" id="luckyName"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="chartContainer">
+        <canvas id="myChart"></canvas>
+    </div>
+</div>
+
+<!-- Materialize JS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<!-- Confetti -->
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.4.0/dist/confetti.browser.min.js"></script>
+<script>
+  let pickedUserId = null;
+
+  document.getElementById('pickLuckyBtn').addEventListener('click', function() {
+    fetch('/pick-lucky')
+      .then(res => res.json())
+      .then(data => {
+        pickedUserId = data.id;
+        document.getElementById('luckyName').innerText = data.name;
+        document.getElementById('confirmBtn').style.display = (data.id ? 'inline-block' : 'none');
+      })
+      .catch(err => console.error(err));
+  });
+
+  document.getElementById('confirmBtn').addEventListener('click', function(){
+    if (!pickedUserId) return;
+    fetch('/confirm-lucky', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: pickedUserId })
+    })
+      .then(res => res.json())
+      .then(data => {
+        // После подтверждения, обновим график
+        loadChartData();
+        M.toast({html: data.message, displayLength: 2000});
+
+        // Запускаем анимацию конфетти
+        confetti({
+          particleCount: 100,
+          spread: 70,
+          origin: { y: 0.6 }
+        });
+
+        // Сбросим состояние страницы (уберём имя и кнопку Подтвердить)
+        pickedUserId = null;
+        document.getElementById('luckyName').innerText = '';
+        document.getElementById('confirmBtn').style.display = 'none';
+      })
+      .catch(err => console.error(err));
+  });
+
+  // Функция для загрузки статистики и отрисовки графика
+  let chart;
+  function loadChartData() {
+    fetch('/stats')
+      .then(res => res.json())
+      .then(data => {
+        const labels = data.map(item => item.name);
+        const counts = data.map(item => item.lucky_count);
+
+        // Если график уже есть, уничтожаем и создаём заново
+        if (chart) {
+          chart.destroy();
+        }
+
+        const ctx = document.getElementById('myChart').getContext('2d');
+        chart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Количество счастливчиков',
+              data: counts,
+              backgroundColor: 'rgba(54, 162, 235, 0.5)',
+              borderColor: 'rgba(54, 162, 235, 1)',
+              borderWidth: 1
+            }]
+          },
+          options: {
+            scales: {
+              y: { beginAtZero: true }
+            }
+          }
+        });
+      })
+      .catch(err => console.error(err));
+  }
+
+  // При загрузке страницы сразу грузим статистику
+  document.addEventListener('DOMContentLoaded', function() {
+    loadChartData();
+  });
+</script>
+</body>
+</html>

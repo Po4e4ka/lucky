@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Настройки</title>
+    <!-- Materialize CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
+    <style>
+        .page-container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        table.striped thead {
+            background-color: #f2f2f2;
+        }
+        .back-link {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+<nav>
+    <div class="nav-wrapper teal">
+        <a href="/" class="brand-logo center">Счастливчик</a>
+        <ul id="nav-mobile" class="right hide-on-med-and-down">
+            <li><a href="/settings">Настройки</a></li>
+        </ul>
+    </div>
+</nav>
+<div class="page-container">
+    <a href="/" class="btn grey back-link">Назад</a>
+
+    <h3>Список людей</h3>
+    <table class="striped">
+        <thead>
+        <tr>
+            <th>ID</th>
+            <th>Имя</th>
+            <th>Кол-во счастливчиков</th>
+            <th>+1</th>
+            <th>Участвует</th>
+            <th>Действие</th>
+        </tr>
+        </thead>
+        <tbody id="usersTableBody"></tbody>
+    </table>
+
+    <div class="row">
+        <div class="col s12 m6">
+            <h4>Добавить пользователя</h4>
+            <div class="input-field">
+                <input type="text" id="newUserName" placeholder="Имя">
+            </div>
+            <button id="addUserBtn" class="btn waves-effect waves-light teal">Добавить</button>
+        </div>
+    </div>
+
+</div>
+
+<!-- Materialize JS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+<script>
+  function loadUsers() {
+    fetch('/stats')
+      .then(res => res.json())
+      .then(data => {
+        const tbody = document.querySelector('#usersTableBody');
+        tbody.innerHTML = '';
+        data.forEach(u => {
+          const row = document.createElement('tr');
+
+          // Создаём checkbox для "enabled"
+          const checkedAttr = u.enabled == 1 ? 'checked' : '';
+
+          row.innerHTML = `
+                      <td>${u.id}</td>
+                      <td>${u.name}</td>
+                      <td>${u.lucky_count}</td>
+                      <td><button data-id="${u.id}" class="btn incBtn">+1</button></td>
+                      <td>
+                        <label>
+                          <input type="checkbox" class="filled-in enabledCheckbox" data-id="${u.id}" ${checkedAttr} />
+                          <span></span>
+                        </label>
+                      </td>
+                      <td><button data-id="${u.id}" class="btn editBtn orange">Редактировать</button></td>
+                    `;
+          tbody.appendChild(row);
+        });
+
+        // Вешаем обработчик на все кнопки +1
+        document.querySelectorAll('.incBtn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const id = btn.getAttribute('data-id');
+            fetch('/settings/increment', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ id: id })
+            })
+              .then(() => {
+                M.toast({html: 'Счётчик увеличен', displayLength: 1500});
+                loadUsers();
+              })
+              .catch(err => console.error(err));
+          });
+        });
+
+        // Вешаем обработчик на чекбоксы "enabled"
+        document.querySelectorAll('.enabledCheckbox').forEach(ch => {
+          ch.addEventListener('change', () => {
+            const id = ch.getAttribute('data-id');
+            const newVal = ch.checked ? 1 : 0;
+
+            // Отправим на сервер, чтобы обновить enabled
+            fetch('/settings/edit', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({
+                id: id,
+                enabled: newVal // мы передадим этот параметр
+              })
+            })
+              .then(() => {
+                M.toast({html: 'Статус участия изменён', displayLength: 1500});
+                loadUsers();
+              })
+              .catch(err => console.error(err));
+          });
+        });
+
+        // Обработчик на кнопку Редактировать (имя и lucky_count)
+        document.querySelectorAll('.editBtn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const id = btn.getAttribute('data-id');
+            const user = data.find(u => u.id == id);
+            if (!user) return;
+
+            const newName = prompt('Новое имя:', user.name);
+            if (newName === null) return; // Отменили
+            const newCount = prompt('Новое количество счастливчиков:', user.lucky_count);
+            if (newCount === null) return; // Отменили
+
+            fetch('/settings/edit', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({
+                id: id,
+                name: newName,
+                lucky_count: parseInt(newCount, 10)
+              })
+            })
+              .then(() => {
+                M.toast({html: 'Данные обновлены', displayLength: 1500});
+                loadUsers();
+              })
+              .catch(err => console.error(err));
+          });
+        });
+
+      })
+      .catch(err => console.error(err));
+  }
+
+  // Добавление пользователя
+  document.addEventListener('DOMContentLoaded', function() {
+    const addBtn = document.getElementById('addUserBtn');
+    addBtn.addEventListener('click', () => {
+      const nameField = document.getElementById('newUserName');
+      const name = nameField.value.trim();
+      if (!name) return;
+
+      fetch('/settings/add', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ name })
+      })
+        .then(() => {
+          nameField.value = '';
+          M.toast({html: 'Пользователь добавлен', displayLength: 1500});
+          loadUsers();
+        })
+        .catch(err => console.error(err));
+    });
+
+    loadUsers();
+  });
+</script>
+</body>
+</html>
+
