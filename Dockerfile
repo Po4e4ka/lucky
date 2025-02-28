@@ -1,4 +1,6 @@
 FROM php
+
+RUN apt update && apt install git -y
 # импортируем композер
 COPY --from=composer:latest /usr/bin/composer /usr/local/bin/composer
 
