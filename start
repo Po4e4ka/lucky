@@ -1,2 +1,2 @@
 docker build -t lucky .
-docker run -p 4203:8000 -v $(pwd):/var/www lucky
+docker run -d -p 4203:8000 -v $(pwd):/var/www lucky
