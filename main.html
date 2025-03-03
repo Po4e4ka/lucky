@@ -75,6 +75,7 @@
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.4.0/dist/confetti.browser.min.js"></script>
 <script>
   let pickedUserId = null;
+  let lastConfirmedId = null;
 
   document.getElementById('pickLuckyBtn').addEventListener('click', function() {
     fetch('/pick-lucky')
@@ -82,13 +83,14 @@
       .then(data => {
         pickedUserId = data.id;
         document.getElementById('luckyName').innerText = data.name;
-        document.getElementById('confirmBtn').style.display = (data.id ? 'inline-block' : 'none');
+        document.getElementById('confirmBtn').style.display = data.id ? 'inline-block' : 'none';
       })
       .catch(err => console.error(err));
   });
 
-  document.getElementById('confirmBtn').addEventListener('click', function(){
+  document.getElementById('confirmBtn').addEventListener('click', function() {
     if (!pickedUserId) return;
+    lastConfirmedId = pickedUserId;
     fetch('/confirm-lucky', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -96,7 +98,6 @@
     })
       .then(res => res.json())
       .then(data => {
-        // После подтверждения, обновим график
         loadChartData();
         M.toast({html: data.message, displayLength: 2000});
 
@@ -121,10 +122,22 @@
     fetch('/stats')
       .then(res => res.json())
       .then(data => {
+        // data — массив пользователей {id, name, lucky_count, enabled}
         const labels = data.map(item => item.name);
         const counts = data.map(item => item.lucky_count);
+        console.log(lastConfirmedId)
 
-        // Если график уже есть, уничтожаем и создаём заново
+        // Тут формируем массив цветов
+        const backgroundColors = data.map(item => {
+          if (item.id === lastConfirmedId) {
+            // Человек, который последний раз был подтверждён
+            return 'rgba(255, 99, 132, 0.6)'; // например, розовый/красный
+          }
+          // Остальным – стандартный цвет
+          return 'rgba(54, 162, 235, 0.5)';
+        });
+
+        // Уничтожаем старый график, если есть
         if (chart) {
           chart.destroy();
         }
@@ -137,7 +150,7 @@
             datasets: [{
               label: 'Количество счастливчиков',
               data: counts,
-              backgroundColor: 'rgba(54, 162, 235, 0.5)',
+              backgroundColor: backgroundColors, // <-- используем разные цвета
               borderColor: 'rgba(54, 162, 235, 1)',
               borderWidth: 1
             }]
