@@ -10,22 +10,21 @@ use Slim\Factory\AppFactory;
 // Пример простой Basic Auth
 // --------------------------------------
 
-// Указываем пару логин:пароль
 $basicUser = 'egor';
 $basicPass = '12341234';
+$telegramBotToken = '';
+$telegramChatId = '';
+$telegramReply = 1031;
 
-// Создадим middleware для проверки Basic Auth
+
 $basicAuthMiddleware = function (Request $request, $handler) use ($basicUser, $basicPass) {
-    // Извлекаем заголовок Authorization
     $authHeader = $request->getHeaderLine('Authorization');
 
-    // Если нет заголовка или он не начинается с "Basic ", просим авторизоваться
     if (!$authHeader || stripos($authHeader, 'Basic ') !== 0) {
         $response = new \Slim\Psr7\Response(401);
         return $response->withHeader('WWW-Authenticate', 'Basic realm="Protected"');
     }
 
-    // Берём base64 часть (после Basic )
     $encoded = substr($authHeader, 6);
     $decoded = base64_decode($encoded);
     if (!$decoded) {
@@ -33,7 +32,6 @@ $basicAuthMiddleware = function (Request $request, $handler) use ($basicUser, $b
         return $response->withHeader('WWW-Authenticate', 'Basic realm="Protected"');
     }
 
-    // Ожидаем формат "user:pass"
     $parts = explode(':', $decoded, 2);
     if (count($parts) < 2) {
         $response = new \Slim\Psr7\Response(401);
@@ -43,19 +41,49 @@ $basicAuthMiddleware = function (Request $request, $handler) use ($basicUser, $b
     $userProvided = $parts[0];
     $passProvided = $parts[1];
 
-    // Сверяем с нашими кредами
     if ($userProvided !== $basicUser || $passProvided !== $basicPass) {
         $response = new \Slim\Psr7\Response(401);
         return $response->withHeader('WWW-Authenticate', 'Basic realm="Protected"');
     }
 
-    // Если всё окей, пропускаем дальше
     return $handler->handle($request);
 };
 
 // --------------------------------------
 
 $app = AppFactory::create();
+
+function sendDatabaseToTelegram(string $botToken, string $chatId, int $replyTo): array {
+    $today = date('d-m-Y');
+    $dumpPath = __DIR__ . "/dump_$today.sqlite";
+    copy(__DIR__ . '/database.sqlite', $dumpPath);
+
+    $postData = [
+        'chat_id' => $chatId,
+        'caption' => "📎 Дамп на $today",
+        'document' => new CURLFile($dumpPath),
+        'reply_to_message_id' => $replyTo
+    ];
+
+    $ch = curl_init("https://api.telegram.org/bot$botToken/sendDocument");
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $postData
+    ]);
+    $result = curl_exec($ch);
+    curl_close($ch);
+
+    $data = json_decode($result, true);
+
+    return $data;
+}
+
+$app->get('/send-db', function (Request $request, Response $response) use ($telegramBotToken, $telegramChatId, $telegramReply) {
+    $result = sendDatabaseToTelegram($telegramBotToken, $telegramChatId, $telegramReply);
+    $response->getBody()->write(json_encode($result));
+    return $response->withHeader('Content-Type', 'application/json');
+});
 
 $app->add($basicAuthMiddleware);
 
@@ -101,7 +129,7 @@ $app->get('/pick-lucky', function (Request $request, Response $response) use ($p
 // --------------------------------------
 // Подтверждает выбор (инкрементирует счётчик)
 // --------------------------------------
-$app->post('/confirm-lucky', function (Request $request, Response $response) use ($pdo) {
+$app->post('/confirm-lucky', function (Request $request, Response $response) use ($pdo, $telegramChatId, $telegramBotToken, $telegramReply) {
     $data = json_decode($request->getBody()->getContents(), true);
     $userId = $data['id'] ?? null;
 
@@ -114,7 +142,11 @@ $app->post('/confirm-lucky', function (Request $request, Response $response) use
     } else {
         $respData = [ 'message' => 'Не удалось подтвердить (id отсутствует)' ];
     }
-
+    try {
+        sendDatabaseToTelegram($telegramBotToken, $telegramChatId, $telegramReply);
+    } catch (\Throwable) {
+        //
+    }
     $response->getBody()->write(json_encode($respData, JSON_UNESCAPED_UNICODE));
     return $response->withHeader('Content-Type', 'application/json');
 });
@@ -203,5 +235,7 @@ $app->post('/settings/edit', function (Request $request, Response $response) use
 
     return $response;
 });
+
+
 
 $app->run();
