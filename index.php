@@ -7,15 +7,13 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Factory\AppFactory;
 
 // --------------------------------------
-// Пример простой Basic Auth
+// Простой Basic Auth
 // --------------------------------------
-
 $basicUser = 'egor';
 $basicPass = '12341234';
 $telegramBotToken = '';
 $telegramChatId = '';
 $telegramReply = 1031;
-
 
 $basicAuthMiddleware = function (Request $request, $handler) use ($basicUser, $basicPass) {
     $authHeader = $request->getHeaderLine('Authorization');
@@ -49,10 +47,11 @@ $basicAuthMiddleware = function (Request $request, $handler) use ($basicUser, $b
     return $handler->handle($request);
 };
 
-// --------------------------------------
-
 $app = AppFactory::create();
 
+// --------------------------------------
+// Функция отправки дампа в Telegram
+// --------------------------------------
 function sendDatabaseToTelegram(string $botToken, string $chatId, int $replyTo): array {
     $today = date('d-m-Y');
     $dumpPath = __DIR__ . "/dump_$today.sqlite";
@@ -87,20 +86,29 @@ $app->get('/send-db', function (Request $request, Response $response) use ($tele
 
 $app->add($basicAuthMiddleware);
 
-// Настраиваем подключение к SQLite
+// --------------------------------------
+// Настройка PDO и миграция схемы
+// --------------------------------------
 $pdo = new PDO('sqlite:' . __DIR__ . '/database.sqlite');
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-// На всякий случай добавим столбец "enabled" (если его нет)
-// В реальном проекте лучше выполнять миграции или проверять через PRAGMA.
-try {
-    $pdo->exec("ALTER TABLE users ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1");
-} catch (Exception $e) {
-    // Если столбец уже есть — ничего не делаем.
-}
+// Создаём таблицу с полем last_lucky
+$pdo->exec("
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      lucky_count INTEGER NOT NULL DEFAULT 0,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_lucky TEXT DEFAULT NULL
+    );
+");
 
-// На всякий случай создаём таблицу, если не существует (на тот случай, если БД чистая)
-$pdo->exec("\n    CREATE TABLE IF NOT EXISTS users (\n        id INTEGER PRIMARY KEY AUTOINCREMENT,\n        name TEXT NOT NULL,\n        lucky_count INTEGER NOT NULL DEFAULT 0,\n        enabled INTEGER NOT NULL DEFAULT 1\n    );\n");
+// Для уже существующих баз добавляем колонку last_lucky, если её нет
+try {
+    $pdo->exec("ALTER TABLE users ADD COLUMN last_lucky TEXT DEFAULT NULL;");
+} catch (PDOException $e) {
+    // если колонка уже есть — игнорируем
+}
 
 // --------------------------------------
 // Главная страница
@@ -115,52 +123,70 @@ $app->get('/', function (Request $request, Response $response) {
 // Возвращает случайного пользователя (только тех, у кого enabled=1)
 // --------------------------------------
 $app->get('/pick-lucky', function (Request $request, Response $response) use ($pdo) {
-    $stmt = $pdo->query("SELECT * FROM users WHERE enabled=1 ORDER BY RANDOM() LIMIT 1");
+    $stmt = $pdo->query("
+       SELECT id, name, lucky_count, enabled, last_lucky 
+         FROM users 
+        WHERE enabled=1 
+        ORDER BY RANDOM() 
+        LIMIT 1
+    ");
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
-
     if (!$user) {
-        $user = ['id' => null, 'name' => 'Нет доступных пользователей', 'lucky_count' => 0];
+        $user = [
+            'id' => null,
+            'name' => 'Нет доступных пользователей',
+            'lucky_count' => 0,
+            'enabled' => 0,
+            'last_lucky' => null
+        ];
     }
-
     $response->getBody()->write(json_encode($user, JSON_UNESCAPED_UNICODE));
     return $response->withHeader('Content-Type', 'application/json');
 });
 
 // --------------------------------------
-// Подтверждает выбор (инкрементирует счётчик)
+// Подтверждает выбор (инкрементирует счётчик и ставит дату)
 // --------------------------------------
 $app->post('/confirm-lucky', function (Request $request, Response $response) use ($pdo, $telegramChatId, $telegramBotToken, $telegramReply) {
     $data = json_decode($request->getBody()->getContents(), true);
     $userId = $data['id'] ?? null;
 
     if ($userId) {
-        $stmt = $pdo->prepare("UPDATE users SET lucky_count = lucky_count + 1 WHERE id = :id");
+        $now = date('Y-m-d H:i:s');
+        $stmt = $pdo->prepare("
+            UPDATE users 
+               SET lucky_count = lucky_count + 1,
+                   last_lucky  = :last_lucky
+             WHERE id = :id
+        ");
         $stmt->bindValue(':id', $userId, PDO::PARAM_INT);
+        $stmt->bindValue(':last_lucky', $now, PDO::PARAM_STR);
         $stmt->execute();
 
-        $respData = [ 'message' => 'Счастливчик подтверждён!' ];
+        $respData = ['message' => 'Счастливчик подтверждён!', 'last_lucky' => $now];
     } else {
-        $respData = [ 'message' => 'Не удалось подтвердить (id отсутствует)' ];
+        $respData = ['message' => 'Не удалось подтвердить (id отсутствует)'];
     }
+
     try {
         sendDatabaseToTelegram($telegramBotToken, $telegramChatId, $telegramReply);
-    } catch (\Throwable) {
-        //
+    } catch (\Throwable $e) {
+        // игнорируем ошибки Telegram
     }
+
     $response->getBody()->write(json_encode($respData, JSON_UNESCAPED_UNICODE));
     return $response->withHeader('Content-Type', 'application/json');
 });
 
 // --------------------------------------
-// Возвращает статистику в JSON
+// Возвращает статистику в JSON (с last_lucky)
 // --------------------------------------
 $app->get('/stats', function (Request $request, Response $response) use ($pdo) {
-    $stmt = $pdo->query("SELECT id, name, lucky_count, enabled FROM users");
+    $stmt = $pdo->query("SELECT id, name, lucky_count, enabled, last_lucky FROM users");
     $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
     $response->getBody()->write(json_encode($users, JSON_UNESCAPED_UNICODE));
     return $response->withHeader('Content-Type', 'application/json');
 });
-
 // --------------------------------------
 // Страница настроек
 // --------------------------------------
@@ -236,6 +262,37 @@ $app->post('/settings/edit', function (Request $request, Response $response) use
     return $response;
 });
 
+// --------------------------------------
+// Удалить пользователя (вызывается из браузера после подтверждения)
+// --------------------------------------
+$app->post('/settings/delete', function (Request $request, Response $response) use ($pdo) {
+    $data = json_decode($request->getBody()->getContents(), true);
+    $id   = $data['id'] ?? null;
+
+    if ($id) {
+        // Проверяем, что пользователь существует
+        $stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM users WHERE id = :id");
+        $stmtCheck->bindValue(':id', $id, PDO::PARAM_INT);
+        $stmtCheck->execute();
+        $exists = (bool) $stmtCheck->fetchColumn();
+
+        if ($exists) {
+            // Удаляем пользователя
+            $stmt = $pdo->prepare("DELETE FROM users WHERE id = :id");
+            $stmt->bindValue(':id', $id, PDO::PARAM_INT);
+            $stmt->execute();
+            $respData = ['message' => 'Пользователь успешно удалён', 'id' => $id];
+        } else {
+            $respData = ['message' => 'Пользователь не найден', 'id' => $id];
+        }
+    } else {
+        $respData = ['message' => 'Не указан id пользователя'];
+    }
+
+    $payload = json_encode($respData, JSON_UNESCAPED_UNICODE);
+    $response->getBody()->write($payload);
+    return $response->withHeader('Content-Type', 'application/json');
+});
 
 
 $app->run();

@@ -1,0 +1,24 @@
+services:
+  lucky:
+    container_name: 'lucky'
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - '4203:8000'
+    volumes:
+      - './:/var/www'
+    working_dir: '/var/www'
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.lucky.rule=Host(`lucky.devilops.fun`)"
+      - "traefik.http.routers.lucky.entrypoints=websecure"
+      - "traefik.http.routers.lucky.tls.certresolver=letsencrypt"
+      - "traefik.http.services.lucky.loadbalancer.server.port=8000"
+    networks:
+      - infra_traefik_net
+
+
+networks:
+  infra_traefik_net:
+    external: true

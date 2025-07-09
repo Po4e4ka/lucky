@@ -55,137 +55,145 @@
             <button id="addUserBtn" class="btn waves-effect waves-light teal">Добавить</button>
         </div>
     </div>
-
 </div>
 
 <!-- Materialize JS -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
 <script>
-  function loadUsers() {
-    fetch('/stats')
-      .then(res => res.json())
-      .then(data => {
-        const tbody = document.querySelector('#usersTableBody');
-        tbody.innerHTML = '';
-        data.forEach(u => {
-          const row = document.createElement('tr');
+    function loadUsers() {
+        fetch('/stats')
+            .then(res => res.json())
+            .then(data => {
+                const tbody = document.querySelector('#usersTableBody');
+                tbody.innerHTML = '';
+                data.forEach(u => {
+                    const checkedAttr = u.enabled == 1 ? 'checked' : '';
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+            <td>${u.id}</td>
+            <td>${u.name}</td>
+            <td>${u.lucky_count}</td>
+            <td><button data-id="${u.id}" class="btn incBtn">+1</button></td>
+            <td>
+              <label>
+                <input type="checkbox" class="filled-in enabledCheckbox" data-id="${u.id}" ${checkedAttr} />
+                <span></span>
+              </label>
+            </td>
+            <td>
+              <button data-id="${u.id}" class="btn editBtn orange">Редактировать</button>
+              <button data-id="${u.id}" class="btn deleteBtn red">Удалить</button>
+            </td>
+          `;
+                    tbody.appendChild(row);
+                });
 
-          // Создаём checkbox для "enabled"
-          const checkedAttr = u.enabled == 1 ? 'checked' : '';
+                // +1 buttons
+                document.querySelectorAll('.incBtn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const id = btn.getAttribute('data-id');
+                        fetch('/settings/increment', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ id })
+                        })
+                            .then(() => {
+                                M.toast({html: 'Счётчик увеличен', displayLength: 1500});
+                                loadUsers();
+                            })
+                            .catch(err => console.error(err));
+                    });
+                });
 
-          row.innerHTML = `
-                      <td>${u.id}</td>
-                      <td>${u.name}</td>
-                      <td>${u.lucky_count}</td>
-                      <td><button data-id="${u.id}" class="btn incBtn">+1</button></td>
-                      <td>
-                        <label>
-                          <input type="checkbox" class="filled-in enabledCheckbox" data-id="${u.id}" ${checkedAttr} />
-                          <span></span>
-                        </label>
-                      </td>
-                      <td><button data-id="${u.id}" class="btn editBtn orange">Редактировать</button></td>
-                    `;
-          tbody.appendChild(row);
-        });
+                // enabled checkboxes
+                document.querySelectorAll('.enabledCheckbox').forEach(ch => {
+                    ch.addEventListener('change', () => {
+                        const id = ch.getAttribute('data-id');
+                        const newVal = ch.checked ? 1 : 0;
+                        fetch('/settings/edit', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ id, enabled: newVal })
+                        })
+                            .then(() => {
+                                M.toast({html: 'Статус участия изменён', displayLength: 1500});
+                                loadUsers();
+                            })
+                            .catch(err => console.error(err));
+                    });
+                });
 
-        // Вешаем обработчик на все кнопки +1
-        document.querySelectorAll('.incBtn').forEach(btn => {
-          btn.addEventListener('click', () => {
-            const id = btn.getAttribute('data-id');
-            fetch('/settings/increment', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({ id: id })
+                // edit buttons
+                document.querySelectorAll('.editBtn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const id = btn.getAttribute('data-id');
+                        const user = data.find(u => u.id == id);
+                        if (!user) return;
+                        const newName = prompt('Новое имя:', user.name);
+                        if (newName === null) return;
+                        const newCount = prompt('Новое количество счастливчиков:', user.lucky_count);
+                        if (newCount === null) return;
+                        fetch('/settings/edit', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                id,
+                                name: newName,
+                                lucky_count: parseInt(newCount, 10)
+                            })
+                        })
+                            .then(() => {
+                                M.toast({html: 'Данные обновлены', displayLength: 1500});
+                                loadUsers();
+                            })
+                            .catch(err => console.error(err));
+                    });
+                });
+
+                // delete buttons
+                document.querySelectorAll('.deleteBtn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const id = btn.getAttribute('data-id');
+                        if (!confirm('Вы уверены, что хотите удалить пользователя с ID ' + id + '?')) return;
+                        fetch('/settings/delete', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ id })
+                        })
+                            .then(res => res.json())
+                            .then(result => {
+                                M.toast({html: result.message, displayLength: 1500});
+                                loadUsers();
+                            })
+                            .catch(err => console.error(err));
+                    });
+                });
+
             })
-              .then(() => {
-                M.toast({html: 'Счётчик увеличен', displayLength: 1500});
-                loadUsers();
-              })
-              .catch(err => console.error(err));
-          });
-        });
+            .catch(err => console.error(err));
+    }
 
-        // Вешаем обработчик на чекбоксы "enabled"
-        document.querySelectorAll('.enabledCheckbox').forEach(ch => {
-          ch.addEventListener('change', () => {
-            const id = ch.getAttribute('data-id');
-            const newVal = ch.checked ? 1 : 0;
-
-            // Отправим на сервер, чтобы обновить enabled
-            fetch('/settings/edit', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({
-                id: id,
-                enabled: newVal // мы передадим этот параметр
-              })
+    document.addEventListener('DOMContentLoaded', function() {
+        const addBtn = document.getElementById('addUserBtn');
+        addBtn.addEventListener('click', () => {
+            const nameField = document.getElementById('newUserName');
+            const name = nameField.value.trim();
+            if (!name) return;
+            fetch('/settings/add', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ name })
             })
-              .then(() => {
-                M.toast({html: 'Статус участия изменён', displayLength: 1500});
-                loadUsers();
-              })
-              .catch(err => console.error(err));
-          });
+                .then(() => {
+                    nameField.value = '';
+                    M.toast({html: 'Пользователь добавлен', displayLength: 1500});
+                    loadUsers();
+                })
+                .catch(err => console.error(err));
         });
-
-        // Обработчик на кнопку Редактировать (имя и lucky_count)
-        document.querySelectorAll('.editBtn').forEach(btn => {
-          btn.addEventListener('click', () => {
-            const id = btn.getAttribute('data-id');
-            const user = data.find(u => u.id == id);
-            if (!user) return;
-
-            const newName = prompt('Новое имя:', user.name);
-            if (newName === null) return; // Отменили
-            const newCount = prompt('Новое количество счастливчиков:', user.lucky_count);
-            if (newCount === null) return; // Отменили
-
-            fetch('/settings/edit', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({
-                id: id,
-                name: newName,
-                lucky_count: parseInt(newCount, 10)
-              })
-            })
-              .then(() => {
-                M.toast({html: 'Данные обновлены', displayLength: 1500});
-                loadUsers();
-              })
-              .catch(err => console.error(err));
-          });
-        });
-
-      })
-      .catch(err => console.error(err));
-  }
-
-  // Добавление пользователя
-  document.addEventListener('DOMContentLoaded', function() {
-    const addBtn = document.getElementById('addUserBtn');
-    addBtn.addEventListener('click', () => {
-      const nameField = document.getElementById('newUserName');
-      const name = nameField.value.trim();
-      if (!name) return;
-
-      fetch('/settings/add', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ name })
-      })
-        .then(() => {
-          nameField.value = '';
-          M.toast({html: 'Пользователь добавлен', displayLength: 1500});
-          loadUsers();
-        })
-        .catch(err => console.error(err));
+        loadUsers();
     });
-
-    loadUsers();
-  });
 </script>
 </body>
 </html>
-
+</qodoArtifact>

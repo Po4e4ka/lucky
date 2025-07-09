@@ -19,6 +19,11 @@
             align-items: center;
             justify-content: center;
         }
+        #last-lucky-info {
+            font-size: 1em;
+            margin-top: 0.5em;
+            color: #555;
+        }
         #chartContainer {
             width: 100%;
             height: 400px;
@@ -59,6 +64,12 @@
             <div class="row">
                 <div class="col s12 center" id="luckyName"></div>
             </div>
+            <!-- Новый элемент: дни с последнего выбора -->
+            <div class="row">
+                <div class="col s12 center">
+                    <p id="last-lucky-info"></p>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -74,101 +85,103 @@
 <!-- Confetti -->
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.4.0/dist/confetti.browser.min.js"></script>
 <script>
-  let pickedUserId = null;
-  let lastConfirmedId = null;
+    let pickedUserId = null;
+    let lastConfirmedId = null;
 
-  document.getElementById('pickLuckyBtn').addEventListener('click', function() {
-    fetch('/pick-lucky')
-      .then(res => res.json())
-      .then(data => {
-        pickedUserId = data.id;
-        document.getElementById('luckyName').innerText = data.name;
-        document.getElementById('confirmBtn').style.display = data.id ? 'inline-block' : 'none';
-      })
-      .catch(err => console.error(err));
-  });
+    document.getElementById('pickLuckyBtn').addEventListener('click', function() {
+        fetch('/pick-lucky')
+            .then(res => res.json())
+            .then(data => {
+                pickedUserId = data.id;
+                document.getElementById('luckyName').innerText = data.name;
+                document.getElementById('confirmBtn').style.display = data.id ? 'inline-block' : 'none';
 
-  document.getElementById('confirmBtn').addEventListener('click', function() {
-    if (!pickedUserId) return;
-    lastConfirmedId = pickedUserId;
-    fetch('/confirm-lucky', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: pickedUserId })
-    })
-      .then(res => res.json())
-      .then(data => {
+                const infoEl = document.getElementById('last-lucky-info');
+                if (data.last_lucky) {
+                    const lastDate = new Date(data.last_lucky.replace(' ', 'T'));
+                    const now = new Date();
+                    const diffMs = now - lastDate;
+                    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                    infoEl.innerText = `Последний раз выбирался: ${diffDays} дн. назад`;
+                } else {
+                    infoEl.innerText = 'Ещё не выбирался';
+                }
+            })
+            .catch(err => console.error(err));
+    });
+
+    document.getElementById('confirmBtn').addEventListener('click', function() {
+        if (!pickedUserId) return;
+        lastConfirmedId = pickedUserId;
+        fetch('/confirm-lucky', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: pickedUserId })
+        })
+            .then(res => res.json())
+            .then(data => {
+                loadChartData();
+                M.toast({html: data.message, displayLength: 2000});
+
+                // Конфетти
+                confetti({
+                    particleCount: 100,
+                    spread: 70,
+                    origin: { y: 0.6 }
+                });
+
+                // Сбросим состояние страницы
+                pickedUserId = null;
+                document.getElementById('luckyName').innerText = '';
+                document.getElementById('confirmBtn').style.display = 'none';
+                // Очистить информацию о последнем выборе
+                document.getElementById('last-lucky-info').innerText = '';
+            })
+            .catch(err => console.error(err));
+    });
+
+    // Функция для загрузки статистики и отрисовки графика
+    let chart;
+    function loadChartData() {
+        fetch('/stats')
+            .then(res => res.json())
+            .then(data => {
+                const labels = data.map(item => item.name);
+                const counts = data.map(item => item.lucky_count);
+
+                // цвета для последнего подтверждённого
+                const backgroundColors = data.map(item =>
+                    item.id === lastConfirmedId
+                        ? 'rgba(255, 99, 132, 0.6)'
+                        : 'rgba(54, 162, 235, 0.5)'
+                );
+
+                if (chart) chart.destroy();
+
+                const ctx = document.getElementById('myChart').getContext('2d');
+                chart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Количество счастливчиков',
+                            data: counts,
+                            backgroundColor: backgroundColors,
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        scales: { y: { beginAtZero: true } }
+                    }
+                });
+            })
+            .catch(err => console.error(err));
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
         loadChartData();
-        M.toast({html: data.message, displayLength: 2000});
-
-        // Запускаем анимацию конфетти
-        confetti({
-          particleCount: 100,
-          spread: 70,
-          origin: { y: 0.6 }
-        });
-
-        // Сбросим состояние страницы (уберём имя и кнопку Подтвердить)
-        pickedUserId = null;
-        document.getElementById('luckyName').innerText = '';
-        document.getElementById('confirmBtn').style.display = 'none';
-      })
-      .catch(err => console.error(err));
-  });
-
-  // Функция для загрузки статистики и отрисовки графика
-  let chart;
-  function loadChartData() {
-    fetch('/stats')
-      .then(res => res.json())
-      .then(data => {
-        // data — массив пользователей {id, name, lucky_count, enabled}
-        const labels = data.map(item => item.name);
-        const counts = data.map(item => item.lucky_count);
-        console.log(lastConfirmedId)
-
-        // Тут формируем массив цветов
-        const backgroundColors = data.map(item => {
-          if (item.id === lastConfirmedId) {
-            // Человек, который последний раз был подтверждён
-            return 'rgba(255, 99, 132, 0.6)'; // например, розовый/красный
-          }
-          // Остальным – стандартный цвет
-          return 'rgba(54, 162, 235, 0.5)';
-        });
-
-        // Уничтожаем старый график, если есть
-        if (chart) {
-          chart.destroy();
-        }
-
-        const ctx = document.getElementById('myChart').getContext('2d');
-        chart = new Chart(ctx, {
-          type: 'bar',
-          data: {
-            labels: labels,
-            datasets: [{
-              label: 'Количество счастливчиков',
-              data: counts,
-              backgroundColor: backgroundColors, // <-- используем разные цвета
-              borderColor: 'rgba(54, 162, 235, 1)',
-              borderWidth: 1
-            }]
-          },
-          options: {
-            scales: {
-              y: { beginAtZero: true }
-            }
-          }
-        });
-      })
-      .catch(err => console.error(err));
-  }
-
-  // При загрузке страницы сразу грузим статистику
-  document.addEventListener('DOMContentLoaded', function() {
-    loadChartData();
-  });
+    });
 </script>
 </body>
 </html>
