@@ -294,5 +294,37 @@ $app->post('/settings/delete', function (Request $request, Response $response) u
     return $response->withHeader('Content-Type', 'application/json');
 });
 
+$app->get('/send-webapp-btn', function ($request, $response) use ($telegramBotToken, $telegramChatId) {
+    $keyboard = [
+        'keyboard' => [
+            [
+                [
+                    'text' => '🎲 Открыть Счастливчика',
+                    'web_app' => ['url' => 'https://lucky.devilops.fun']
+                ]
+            ]
+        ],
+        'resize_keyboard' => true
+    ];
+
+    $payload = [
+        'chat_id' => $telegramChatId,
+        'text' => 'Запусти мини-приложение:',
+        'reply_markup' => json_encode($keyboard)
+    ];
+
+    $ch = curl_init("https://api.telegram.org/bot$telegramBotToken/sendMessage");
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $payload
+    ]);
+    $result = curl_exec($ch);
+    curl_close($ch);
+
+    $response->getBody()->write($result);
+    return $response->withHeader('Content-Type', 'application/json');
+});
+
 
 $app->run();

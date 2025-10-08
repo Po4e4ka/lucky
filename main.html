@@ -41,6 +41,28 @@
             top: 20px;
         }
     </style>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand(); // растягиваем WebView на весь экран
+
+        // Настраиваем Telegram MainButton
+        tg.MainButton.text = "✅ Подтвердить счастливчика";
+        tg.MainButton.hide();
+
+        // Когда пользователь выбирает счастливчика — показываем кнопку
+        document.getElementById('pickLuckyBtn').addEventListener('click', () => {
+            tg.MainButton.show();
+        });
+
+        // Когда пользователь нажимает кнопку Telegram — триггерим подтверждение
+        tg.MainButton.onClick(() => {
+            document.getElementById('confirmBtn').click();
+        });
+
+        // Немного косметики — чтобы фон адаптировался под Telegram тему
+        document.body.style.backgroundColor = tg.themeParams.bg_color || "#ffffff";
+    </script>
 </head>
 <body>
 <nav>
