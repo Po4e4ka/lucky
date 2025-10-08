@@ -47,6 +47,24 @@ $basicAuthMiddleware = function (Request $request, $handler) use ($basicUser, $b
     return $handler->handle($request);
 };
 
+$conditionalAuthMiddleware = function (Request $request, $handler) use ($basicAuthMiddleware) {
+    // Проверяем — Telegram ли это
+    $userAgent = $request->getHeaderLine('User-Agent');
+    $queryParams = $request->getQueryParams();
+
+    $isTelegramWebApp =
+        (isset($queryParams['tgWebAppData'])) ||
+        (stripos($userAgent, 'Telegram') !== false);
+
+    if ($isTelegramWebApp) {
+        // Если открыт через Telegram — пропускаем без BasicAuth
+        return $handler->handle($request);
+    }
+
+    // Иначе применяем обычную BasicAuth-проверку
+    return $basicAuthMiddleware($request, $handler);
+};
+
 $app = AppFactory::create();
 
 // --------------------------------------
@@ -84,7 +102,7 @@ $app->get('/send-db', function (Request $request, Response $response) use ($tele
     return $response->withHeader('Content-Type', 'application/json');
 });
 
-$app->add($basicAuthMiddleware);
+$app->add($conditionalAuthMiddleware);
 
 // --------------------------------------
 // Настройка PDO и миграция схемы
@@ -294,12 +312,20 @@ $app->post('/settings/delete', function (Request $request, Response $response) u
     return $response->withHeader('Content-Type', 'application/json');
 });
 
-$app->get('/send-webapp-btn', function ($request, $response) use ($telegramBotToken, $telegramChatId) {
+$app->get('/send-webapp-btn', function ($request, $response) use ($telegramBotToken) {
+    $queryParams = $request->getQueryParams();
+    $chatId = $queryParams['chat_id'] ?? null;
+
+    if (!$chatId) {
+        $response->getBody()->write(json_encode(['error' => 'chat_id не указан']));
+        return $response->withHeader('Content-Type', 'application/json')->withStatus(400);
+    }
+
     $keyboard = [
         'keyboard' => [
             [
                 [
-                    'text' => '🎲 Открыть Счастливчика',
+                    'text' => '🎲 Выбрать Счастливчика',
                     'web_app' => ['url' => 'https://lucky.devilops.fun']
                 ]
             ]
@@ -308,7 +334,7 @@ $app->get('/send-webapp-btn', function ($request, $response) use ($telegramBotTo
     ];
 
     $payload = [
-        'chat_id' => $telegramChatId,
+        'chat_id' => $chatId,
         'text' => 'Запусти мини-приложение:',
         'reply_markup' => json_encode($keyboard)
     ];
@@ -325,6 +351,5 @@ $app->get('/send-webapp-btn', function ($request, $response) use ($telegramBotTo
     $response->getBody()->write($result);
     return $response->withHeader('Content-Type', 'application/json');
 });
-
 
 $app->run();
